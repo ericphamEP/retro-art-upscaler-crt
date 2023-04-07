@@ -16,11 +16,12 @@ import cv2
 OUTPUT_PATH = r'H:\Downloads\School\Year5\comp4102\project\examples\output\\'
 
 # Instruction 2: Set below path to valid image file (minimum resolution pixel sprite)
-INPUT_IMAGE = cv2.imread(r'H:\Downloads\School\Year5\comp4102\project\examples\input\worm.png')
+INPUT_IMAGE = cv2.imread(r'H:\Downloads\School\Year5\comp4102\project\examples\input\street_fighter2.png')
 #INPUT_IMAGE = cv2.imread(r'H:\Downloads\School\Year5\comp4102\project\examples\input\upscaled\dracula.png')
 
 # Constants
-SCALE_FACTOR = 100
+SCALE_FACTOR = 25
+DOWNSCALE_FACTOR = 0.25
 LINE_WIDTH_FACTOR = 0.4
 BLUR_SIGMA = 20
 
@@ -74,23 +75,26 @@ def resize_image(img):
 """
 
 
-def scale_image(img, scale):
+def scale_image(img, scale, interpolation=None):
     '''
-    Scale an image by the number?.
+    Scale an image.
 
     :input img: Image
     :return: resized image and height of artwork pixels
     '''
-    img_resized = cv2.resize(img, dsize=(0, 0), fx=scale, fy=scale, interpolation=cv2.INTER_NEAREST)
+    img_resized = cv2.resize(img, dsize=(0, 0), fx=scale, fy=scale, interpolation=interpolation)
     return img_resized
 
 
-def apply_scanlines(img, pixel_height):
+def apply_scanlines(img, pixel_height, alternate=False):
     line_width = int(pixel_height * LINE_WIDTH_FACTOR)
     img_scanlines = img.copy()
     height, width, _ = img_scanlines.shape
 
-    for i in range(0, height, pixel_height):
+    start = 0
+    if alternate:
+        start = int(pixel_height/2)
+    for i in range(start, height+1, pixel_height):
         cv2.line(img_scanlines, (0, i), (width, i), (0, 0, 0), line_width)
 
     return img_scanlines
@@ -127,7 +131,7 @@ def apply_scanlines(img, pixel_height):
 
 
 def apply_blur(img, pixel_height):
-    scale = int(pixel_height/3)
+    scale = int(pixel_height/4)
     minimal_kernel = np.asarray([
         [2.0, 1.5, 1.5, 1.5, 1.5, 1.5, 2.0],
         [1.5, 3.5, 3.0, 3.0, 3.0, 3.5, 1.5],
@@ -139,14 +143,15 @@ def apply_blur(img, pixel_height):
     ])
 
     # Expand minimal kernel to full size of pixel_height
-    kernel = np.repeat(minimal_kernel, 24, axis=0) # todo: try 24 for this as well
-    kernel = np.repeat(kernel, 24, axis=1)
+    kernel = np.repeat(minimal_kernel, scale/2, axis=0) # todo: try 24 for this as well
+    kernel = np.repeat(kernel, scale, axis=1)
     kernel /= kernel.sum()
 
     img_filtered = cv2.filter2D(img, -1, kernel, borderType = cv2.BORDER_DEFAULT)
     return img_filtered
 
 
+# Does not work
 def apply_blur_test(img, pixel_height):
     minimal_kernel = np.asarray([
         [1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5],
@@ -178,7 +183,7 @@ def apply_blur_test(img, pixel_height):
     return img_blur
 
 
-def cleanup_filter_image(img, pixel_height):
+def cleanup_filter(img, pixel_height):
     # include denoising, maybe sharpen?
     scale = int(pixel_height/3)
     minimal_kernel = np.asarray([
@@ -191,55 +196,92 @@ def cleanup_filter_image(img, pixel_height):
     kernel = np.repeat(minimal_kernel, scale, axis=0)
     kernel = np.repeat(kernel, scale, axis=1)
     kernel /= kernel.sum()
-    
 
     img_filtered = cv2.filter2D(img, -1, kernel, borderType = cv2.BORDER_DEFAULT)
-    cv2.imshow('img filtered clean', cv2.resize(img_filtered, dsize=(0, 0), fx=0.1, fy=0.1))
-    
-    #line_width = int(pixel_height * LINE_WIDTH_FACTOR)
+    return img_filtered
 
-    #img_combined = img_filtered+img
-    img_combined = cv2.addWeighted(img, 0.4, img_filtered, 1, 0)
 
+def apply_sharpen(img, pixel_height):
     # Sharpen filter
-    blur = cv2.GaussianBlur(img_combined, (0,0), sigmaX=40, sigmaY=40)
-    result = cv2.addWeighted(img_combined, 2.0, blur, -1.0, 0)
+    '''blur = cv2.GaussianBlur(img_combined, (0,0), sigmaX=40, sigmaY=40)
+    result = cv2.addWeighted(img_combined, 2.0, blur, -1.0, 0)'''
 
     # Sharpen algo #2
-    sharpen_filter = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
-    result = cv2.filter2D(result, -1, sharpen_filter)
+    '''sharpen_filter = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
+    result = cv2.filter2D(result, -1, sharpen_filter)'''
 
-    # Unsharp mask algo
-    # todo:
-
-    return result
+    # Unsharp mask algo based on OpenCV docs: https://docs.opencv.org/4.x/d1/d10/classcv_1_1MatExpr.html#details
+    sigma = 20
+    threshold = 5
+    amount = 1.0
+    kernel_size=(pixel_height*3, pixel_height*3)
+    blurred = cv2.GaussianBlur(img, (kernel_size), sigma)
+    low_contrast_mask = np.absolute(img - blurred) < threshold
+    sharpened = np.clip(img * (1.0 + amount) + blurred * (-amount), 0, 255).round().astype(np.uint8)
+    np.copyto(sharpened, img, where=low_contrast_mask)
+    return sharpened
 
 
 def art_upscale(img):
-    '''
-    
-    '''
-    # call all other functions on this one
-    result = img
-    return result
-
-
-if __name__ == '__main__':
-    #INPUT_IMAGE = cv2.resize(INPUT_IMAGE, dsize=(0, 0), fx=1/14, fy=1/14)
-
-    # test code
-    img_upscaled = scale_image(INPUT_IMAGE, SCALE_FACTOR)
+    img_upscaled = scale_image(img, SCALE_FACTOR, cv2.INTER_NEAREST)
     img_scanlines = apply_scanlines(img_upscaled, SCALE_FACTOR)
 
     img_blur = apply_blur(img_scanlines, SCALE_FACTOR)
-    #img_blur_test = apply_blur_test(img_scanlines, SCALE_FACTOR)
+    #img_blur_test = apply_blur_test(img_scanlines, SCALE_FACTOR) #temp
 
-    img_cleanup = cleanup_filter_image(img_blur, SCALE_FACTOR)
+    img_cleanup_filter = cleanup_filter(img_blur, SCALE_FACTOR)
+    img_cleanup = cv2.addWeighted(img_blur, 0.42, img_cleanup_filter, 0.98, 0)
 
-    cv2.imshow('img scanlines', cv2.resize(img_scanlines, dsize=(0, 0), fx=0.1, fy=0.1))
-    cv2.imshow('img blur', cv2.resize(img_blur, dsize=(0, 0), fx=0.1, fy=0.1))
-    #cv2.imshow('img blur test', cv2.resize(img_blur_test, dsize=(0, 0), fx=0.1, fy=0.1))
-    cv2.imshow('img cleanup', cv2.resize(img_cleanup, dsize=(0, 0), fx=0.1, fy=0.1))
+    img_sharpen = apply_sharpen(img_cleanup, SCALE_FACTOR)
+
+    cv2.imshow('img original', scale_image(img_upscaled, DOWNSCALE_FACTOR))
+    cv2.imshow('img scanlines', scale_image(img_scanlines, DOWNSCALE_FACTOR))
+    cv2.imwrite(OUTPUT_PATH+'img_scanlines.jpg', img_scanlines)
+
+    cv2.imshow('img crt', scale_image(img_blur, DOWNSCALE_FACTOR))
+    cv2.imwrite(OUTPUT_PATH+'img_crt.jpg', img_blur)
+
+    #cv2.imshow('img blur test', scale_image(img_blur_test, DOWNSCALE_FACTOR))
+
+    cv2.imshow('img filtered clean', scale_image(img_cleanup_filter, DOWNSCALE_FACTOR))
+    cv2.imwrite(OUTPUT_PATH+'img_clean_filter.jpg', img_cleanup_filter)
+
+    cv2.imshow('img cleanup', scale_image(img_cleanup, DOWNSCALE_FACTOR))
+    cv2.imwrite(OUTPUT_PATH+'img_cleanup.jpg', img_cleanup)
+
+    cv2.imshow('img sharpen', scale_image(img_sharpen, DOWNSCALE_FACTOR))
+    cv2.imwrite(OUTPUT_PATH+'img_sharpen.jpg', img_sharpen)
+
+    # Method 2
+    img_scanlines2 = apply_scanlines(img_upscaled, SCALE_FACTOR, alternate=True)
+    img_blur2 = apply_blur(img_scanlines2, SCALE_FACTOR)
+    img_combined = cv2.addWeighted(img_blur, 0.6, img_blur2, 0.6, 0)
+
+    img_cleanup_filter2 = cleanup_filter(img_combined, SCALE_FACTOR)
+    img_cleanup2 = cv2.addWeighted(img_combined, 0.42, img_cleanup_filter2, 0.98, 0)
+
+    img_sharpen2 = apply_sharpen(img_cleanup2, SCALE_FACTOR)
+
+    cv2.imshow('img scanlines 2', scale_image(img_scanlines2, DOWNSCALE_FACTOR))
+    cv2.imwrite(OUTPUT_PATH+'img_method2_scanlines2.jpg', img_scanlines2)
+
+    cv2.imshow('img crt2', scale_image(img_blur2, DOWNSCALE_FACTOR))
+    cv2.imwrite(OUTPUT_PATH+'img_method2_crt2.jpg', img_blur2)
+
+    cv2.imshow('img crt combo', scale_image(img_combined, DOWNSCALE_FACTOR))
+    cv2.imwrite(OUTPUT_PATH+'img_method2_crt_combo.jpg', img_combined)
+
+    cv2.imshow('img crt combo cleanup', scale_image(img_cleanup2, DOWNSCALE_FACTOR))
+    cv2.imwrite(OUTPUT_PATH+'img_method2_crt_combo_clean.jpg', img_cleanup2)
+
+    cv2.imshow('img crt combo cleanup sharpen', scale_image(img_sharpen2, DOWNSCALE_FACTOR))
+    cv2.imwrite(OUTPUT_PATH+'img_method2_sharpen.jpg', img_sharpen2)
+
+
+if __name__ == '__main__':
+    #INPUT_IMAGE = cv2.resize(INPUT_IMAGE, dsize=(0, 0), fx=1/14, fy=1/14) #temp downscale dracula
+
+    art_upscale(INPUT_IMAGE)
 
     cv2.waitKey(0)
     cv2.destroyAllWindows()
