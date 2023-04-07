@@ -8,16 +8,24 @@ Michael Genkin
 April 12, 2023
 Project - Code
 """
+import math
 import numpy as np
 import cv2
 
 # Instruction 1: Set below path to valid directory to storee result images
 OUTPUT_PATH = r'H:\Downloads\School\Year5\comp4102\project\examples\output\\'
 
-# Instruction 2: Set below path to valid image file
-INPUT_IMAGE = cv2.imread(r'H:\Downloads\School\Year5\comp4102\project\examples\input\streets_of_rage.jfif')
+# Instruction 2: Set below path to valid image file (minimum resolution pixel sprite)
+INPUT_IMAGE = cv2.imread(r'H:\Downloads\School\Year5\comp4102\project\examples\input\worm.png')
+#INPUT_IMAGE = cv2.imread(r'H:\Downloads\School\Year5\comp4102\project\examples\input\upscaled\dracula.png')
 
+# Constants
+SCALE_FACTOR = 100
+LINE_WIDTH_FACTOR = 0.4
+BLUR_SIGMA = 20
 
+# Note: Unused for now
+"""
 def pixel_value_distance(val1, val2):
     print(val1, val2, np.sqrt(sum((val1-val2)**2)))
     return np.sqrt(sum((val1-val2)**2))
@@ -49,7 +57,7 @@ def get_pixel_height(img):
     
     return np.median(heights)
 
-
+# Note: Unused for now
 def resize_image(img):
     '''
     Find size of original artwork pixels in possibly-upscaled imag,
@@ -63,25 +71,148 @@ def resize_image(img):
     pixel_height = get_pixel_height(img_resized)
 
     return img_resized, pixel_height
+"""
 
 
-def apply_scanlines():
-    pass
+def scale_image(img, scale):
+    '''
+    Scale an image by the number?.
+
+    :input img: Image
+    :return: resized image and height of artwork pixels
+    '''
+    img_resized = cv2.resize(img, dsize=(0, 0), fx=scale, fy=scale, interpolation=cv2.INTER_NEAREST)
+    return img_resized
 
 
-def brighten_image():
-    # possibly optional?
-    pass
+def apply_scanlines(img, pixel_height):
+    line_width = int(pixel_height * LINE_WIDTH_FACTOR)
+    img_scanlines = img.copy()
+    height, width, _ = img_scanlines.shape
+
+    for i in range(0, height, pixel_height):
+        cv2.line(img_scanlines, (0, i), (width, i), (0, 0, 0), line_width)
+
+    return img_scanlines
 
 
-def apply_light_bleed():
-    # the whiter, the more bleed
-    pass
+# todo: may not use
+"""def apply_light_bleed(img, white_thresh, gain):
+    '''
+    Add bloom effect from white pixels.
+    
+    :input white_thresh: Threshold value to detect white
+    :input gain: Bloom gain intensity
+    '''
+    # convert image to hsv colorspace as floats
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV).astype(np.float64)
+    _, s, v = cv2.split(hsv)
+
+    # Desire low saturation and high brightness for white
+    # Invert saturation and multiply with brightness
+    sv = ((255-s) * v / 255).clip(0,255).astype(np.uint8)
+
+    # Threshold white values
+    thresh = cv2.inRange(hsv, (0, 0, white_thresh), (255, 50, 255))
+    #thresh = cv2.threshold(sv, white_thresh, 255, cv2.THRESH_BINARY)[1]
+
+    # Blur and make 3 channels
+    blur = cv2.GaussianBlur(thresh, (0,0), sigmaX=BLUR_SIGMA, sigmaY=BLUR_SIGMA)
+    blur = cv2.cvtColor(blur, cv2.COLOR_GRAY2BGR)
+
+    # blend blur and image using gain on blur
+    img_bloom = cv2.addWeighted(img, 1, blur, gain, 0)
+    return img_bloom
+"""
 
 
-def cleanup_filter_image():
+def apply_blur(img, pixel_height):
+    scale = int(pixel_height/3)
+    minimal_kernel = np.asarray([
+        [2.0, 1.5, 1.5, 1.5, 1.5, 1.5, 2.0],
+        [1.5, 3.5, 3.0, 3.0, 3.0, 3.5, 1.5],
+        [1.5, 2.0, 3.5, 3.5, 3.5, 2.0, 1.5],
+        [1.5, 2.0, 3.0, 4.0, 3.0, 2.0, 1.5],
+        [1.5, 2.0, 3.5, 3.5, 3.5, 2.0, 1.5],
+        [1.5, 3.5, 3.0, 3.0, 3.0, 3.5, 1.5],
+        [2.0, 1.5, 1.5, 1.5, 1.5, 1.5, 2.0],
+    ])
+
+    # Expand minimal kernel to full size of pixel_height
+    kernel = np.repeat(minimal_kernel, 24, axis=0) # todo: try 24 for this as well
+    kernel = np.repeat(kernel, 24, axis=1)
+    kernel /= kernel.sum()
+
+    img_filtered = cv2.filter2D(img, -1, kernel, borderType = cv2.BORDER_DEFAULT)
+    return img_filtered
+
+
+def apply_blur_test(img, pixel_height):
+    minimal_kernel = np.asarray([
+        [1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5],
+        [1.5, 3.0, 3.0, 3.0, 3.0, 3.0, 1.5],
+        [1.5, 2.0, 3.5, 3.5, 3.5, 2.0, 1.5],
+        [1.5, 2.0, 3.0, 4.0, 3.0, 2.0, 1.5],
+        [1.5, 2.0, 3.5, 3.5, 3.5, 2.0, 1.5],
+        [1.5, 3.0, 3.0, 3.0, 3.0, 3.0, 1.5],
+        [1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5],
+    ])
+
+    # Expand minimal kernel to full size of pixel_height
+    kernel = np.repeat(minimal_kernel, 12, axis=0) # todo: try 24 for this as well
+    kernel = np.repeat(kernel, 24, axis=1)
+    kernel /= kernel.sum()
+
+    v_kernel = np.repeat(minimal_kernel, 24, axis=0)
+    v_kernel = np.repeat(v_kernel, 36, axis=1)
+    v_kernel /= v_kernel.sum()
+
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV).astype(np.float64)
+    h, s, v = cv2.split(hsv)
+
+    h_filtered = cv2.filter2D(h, -1, kernel, borderType = cv2.BORDER_DEFAULT)
+    s_filtered = cv2.filter2D(s, -1, kernel, borderType = cv2.BORDER_DEFAULT)
+    v_filtered = cv2.filter2D(v, -1, v_kernel, borderType = cv2.BORDER_DEFAULT)
+    merged = cv2.merge([h_filtered, s_filtered, v_filtered])
+    img_blur = cv2.cvtColor(cv2.normalize(merged, dst=None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U), cv2.COLOR_HSV2BGR)
+    return img_blur
+
+
+def cleanup_filter_image(img, pixel_height):
     # include denoising, maybe sharpen?
-    pass
+    scale = int(pixel_height/3)
+    minimal_kernel = np.asarray([
+        [1.5, 1.8, 2.0, 1.8, 1.5],
+        [1.8, 1.9, 2.0, 1.9, 1.8],
+        [0.0, 0.0, 0.0, 0.0, 0.0],
+        [1.8, 1.9, 2.0, 1.9, 1.8],
+        [1.5, 1.8, 2.0, 1.8, 1.5],
+    ])
+    kernel = np.repeat(minimal_kernel, scale, axis=0)
+    kernel = np.repeat(kernel, scale, axis=1)
+    kernel /= kernel.sum()
+    
+
+    img_filtered = cv2.filter2D(img, -1, kernel, borderType = cv2.BORDER_DEFAULT)
+    cv2.imshow('img filtered clean', cv2.resize(img_filtered, dsize=(0, 0), fx=0.1, fy=0.1))
+    
+    #line_width = int(pixel_height * LINE_WIDTH_FACTOR)
+
+    #img_combined = img_filtered+img
+    img_combined = cv2.addWeighted(img, 0.4, img_filtered, 1, 0)
+
+    # Sharpen filter
+    blur = cv2.GaussianBlur(img_combined, (0,0), sigmaX=40, sigmaY=40)
+    result = cv2.addWeighted(img_combined, 2.0, blur, -1.0, 0)
+
+    # Sharpen algo #2
+    sharpen_filter = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
+    result = cv2.filter2D(result, -1, sharpen_filter)
+
+    # Unsharp mask algo
+    # todo:
+
+    return result
 
 
 def art_upscale(img):
@@ -94,5 +225,21 @@ def art_upscale(img):
 
 
 if __name__ == '__main__':
+    #INPUT_IMAGE = cv2.resize(INPUT_IMAGE, dsize=(0, 0), fx=1/14, fy=1/14)
+
     # test code
-    img_resized, pixel_height = resize_image(INPUT_IMAGE)
+    img_upscaled = scale_image(INPUT_IMAGE, SCALE_FACTOR)
+    img_scanlines = apply_scanlines(img_upscaled, SCALE_FACTOR)
+
+    img_blur = apply_blur(img_scanlines, SCALE_FACTOR)
+    #img_blur_test = apply_blur_test(img_scanlines, SCALE_FACTOR)
+
+    img_cleanup = cleanup_filter_image(img_blur, SCALE_FACTOR)
+
+    cv2.imshow('img scanlines', cv2.resize(img_scanlines, dsize=(0, 0), fx=0.1, fy=0.1))
+    cv2.imshow('img blur', cv2.resize(img_blur, dsize=(0, 0), fx=0.1, fy=0.1))
+    #cv2.imshow('img blur test', cv2.resize(img_blur_test, dsize=(0, 0), fx=0.1, fy=0.1))
+    cv2.imshow('img cleanup', cv2.resize(img_cleanup, dsize=(0, 0), fx=0.1, fy=0.1))
+
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
